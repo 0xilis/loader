@@ -22,11 +22,6 @@ struct SettingsSheetView: View {
         Tool(name: "Do All", desc: "Do all of the above", action: ToolAction.all),
     ]
     
-    var packagemanagers: [PackageManager] = [
-        PackageManager(name: "Sileo", desc: "Modern package manager (recommended)", action: PackageManagers.sileo),
-        PackageManager(name: "Zebra", desc: "Cydia-ish look and feel with modern features", action: PackageManagers.zebra),
-    ]
-    
     var openers: [Opener] = [
         Opener(name: "Sileo", desc: "Open the Sileo app", action: Openers.sileo),
         Opener(name: "TrollHelper", desc: "Open the TrollHelper app, clicking install will resolve iPad uicache issues", action: Openers.trollhelper),
@@ -42,6 +37,16 @@ struct SettingsSheetView: View {
                 main
             }
         }
+        .alert("Warning", isPresented: $showAlert) {
+            Button("Re-bootstrap anyway") {
+                console.log("[*] Starting re-bootstrap process")
+                strap()
+            }
+            Button("Cancel (Recommended)") {
+            }
+        } message: {
+            Text("Your device already has the bootstrap installed. Re-bootstrapping most times is not needed, and may cause problems.")
+        }
     }
     
     @ViewBuilder
@@ -50,14 +55,11 @@ struct SettingsSheetView: View {
             ForEach(tools) { tool in
                 ToolsView(tool)
             }
-
-            Text("Package Managers")
-                .fontWeight(.bold)
-                .font(.title)
-                .padding()
-
-            ForEach(packagemanagers) { pm in
-                PMView(pm)
+            
+            if (FileManager.default.fileExists(atPath: "/.procursus_strapped") || FileManager.default.fileExists(atPath: "/var/jb/.procursus_strapped")) {
+                ToolsView(Tool(name: "Re-Install", desc: "Re-Install the bootstrap", action: ToolAction.rebootstrap))
+            } else {
+                ToolsView(Tool(name: "Install", desc: "Install the bootstrap", action: ToolAction.bootstrap))
             }
 
             Text("Openers")
@@ -75,6 +77,7 @@ struct SettingsSheetView: View {
         .navigationTitle("Tools")
     }
 
+    @State var showAlert: Bool = false
     @ViewBuilder
     func ToolsView(_ tool: Tool) -> some View {
         Button {
@@ -82,37 +85,42 @@ struct SettingsSheetView: View {
 
             switch tool.action {
                 case .uicache:
-                    spawn(command: "/usr/bin/uicache", args: ["-a"], root: true)
+                    spawn(command: "/var/jb/usr/bin/uicache", args: ["-a"], root: true)
                     console.log("[*] Ran uicache")
                 case .mntrw:
                     spawn(command: "/sbin/mount", args: ["-uw", "/private/preboot"], root: true)
                     spawn(command: "/sbin/mount", args: ["-uw", "/" ], root: true)
                     console.log("[*] Remounted the rootfs and preboot as read/write")
                 case .daemons:
-                    spawn(command: "/bin/launchctl", args: ["bootstrap", "system", "/Library/LaunchDaemons"], root: true)
+                    spawn(command: "/var/jb/bin/launchctl", args: ["bootstrap", "system", "/var/jb/Library/LaunchDaemons"], root: true)
                     console.log("[*] Launched daemons")
                 case .respring:
-                    spawn(command: "/usr/bin/sbreload", args: [], root: true)
+                    spawn(command: "/var/jb/usr/bin/sbreload", args: [], root: true)
                     console.log("[*] Resprung the device... but you probably won't see this :)")
                 case .tweaks:
-                    spawn(command: "/etc/rc.d/substitute-launcher", args: [], root: true)
+                    spawn(command: "/var/jb/usr/libexec/ellekit/loader", args: [], root: true)
                     console.log("[*] Started Substitute, respring to enable tweaks")
                 case .all:
                     spawn(command: "/sbin/mount", args: ["-uw", "/private/preboot"], root: true)
                     spawn(command: "/sbin/mount", args: ["-uw", "/"], root: true)
                     console.log("[*] Remounted the rootfs and preboot as read/write")
 
-                    spawn(command: "/usr/bin/uicache", args: ["-a"], root: true)
+                    spawn(command: "/var/jb/usr/bin/uicache", args: ["-a"], root: true)
                     console.log("[*] Ran uicache")
 
-                    spawn(command: "/bin/launchctl", args: ["bootstrap", "system", "/Library/LaunchDaemons"], root: true)
+                    spawn(command: "/var/jb/bin/launchctl", args: ["bootstrap", "system", "/var/jb/Library/LaunchDaemons"], root: true)
                     console.log("[*] Launched daemons")
 
-                    spawn(command: "/etc/rc.d/substitute-launcher", args: [], root: true)
-                    console.log("[*] Started Substitute, respring to enable tweaks")
+                    spawn(command: "/var/jb/usr/libexec/ellekit/loader", args: [], root: true)
+                    console.log("[*] Started tweaks, respring to enable tweaks")
 
-                    spawn(command: "/usr/bin/sbreload", args: [], root: true)
+                    spawn(command: "/var/jb/usr/bin/sbreload", args: [], root: true)
                     console.log("[*] Resprung the device... but you probably won't see this :)")
+                case .bootstrap :
+                    console.log("[*] Starting bootstrap process")
+                    strap()
+                case .rebootstrap :
+                    showAlert = true
             }
         } label: {
             HStack {
@@ -134,73 +142,7 @@ struct SettingsSheetView: View {
             .padding(.vertical, 4)
         }
         .buttonStyle(.plain)
-    }
-
-    @ViewBuilder
-    func PMView(_ pm: PackageManager) -> some View {
-        Button {
-            self.isOpen.toggle()
-
-            switch pm.action {
-                case .sileo:
-                    console.log("[*] Installing Sileo")
-
-                    guard let deb = Bundle.main.path(forResource: "sileo", ofType: "deb") else {
-                        let msg = "Could not find Sileo"
-                        console.error("[-] \(msg)")
-                        print("[palera1n] \(msg)")
-                        return
-                    }
-
-                    let ret = spawn(command: "/usr/bin/dpkg", args: ["-i", deb], root: true)
-                    DispatchQueue.main.async {
-                        if ret != 0 {
-                            console.error("[-] Failed to install Sileo. Status: \(ret)")
-                            return
-                        }
-
-                        console.log("[*] Installed Sileo")
-                    }
-                case .zebra:
-                    console.log("[*] Installing Zebra")
-
-                    guard let deb = Bundle.main.path(forResource: "zebra", ofType: "deb") else {
-                        let msg = "Could not find Zebra"
-                        console.error("[-] \(msg)")
-                        print("[palera1n] \(msg)")
-                        return
-                    }
-
-                    let ret = spawn(command: "/usr/bin/dpkg", args: ["-i", deb], root: true)
-                    DispatchQueue.main.async {
-                        if ret != 0 {
-                            console.error("[-] Failed to install Zebra. Status: \(ret)")
-                            return
-                        }
-
-                        console.log("[*] Installed Zebra")
-                    }
-            }
-        } label: {
-            HStack {
-                Image(systemName: "wrench")
-                
-                VStack(alignment: .leading) {
-                    Text(pm.name)
-                        .font(.title2.bold())
-                    Text(pm.desc)
-                        .font(.caption)
-                }
-                Spacer()
-            }
-            .padding()
-            .frame(maxWidth: .infinity)
-            .background(Capsule().foregroundColor(.init("CellBackground")).background(.ultraThinMaterial))
-            .clipShape(Capsule())
-            .padding(.horizontal)
-            .padding(.vertical, 4)
-        }
-        .buttonStyle(.plain)
+        
     }
 
     @ViewBuilder
@@ -210,7 +152,7 @@ struct SettingsSheetView: View {
 
             switch opener.action {
                 case .sileo:
-                    let ret = spawn(command: "/usr/bin/uiopen", args: ["--path", "/Applications/Sileo.app"], root: true)
+                    let ret = spawn(command: "/var/jb/usr/bin/uiopen", args: ["--path", "/var/jb/Applications/Sileo-Nightly.app"], root: true)
                     DispatchQueue.main.async {
                         if ret != 0 {
                             console.error("[-] Failed to open Sileo. Status: \(ret)")
@@ -220,7 +162,7 @@ struct SettingsSheetView: View {
                         console.log("[*] Opened Sileo")
                     }
                 case .trollhelper:
-                    let ret = spawn(command: "/usr/bin/uiopen", args: ["--path", "/Applications/TrollStorePersistenceHelper.app"], root: true)
+                    let ret = spawn(command: "/var/jb/usr/bin/uiopen", args: ["--path", "/var/jb/Applications/TrollStorePersistenceHelper.app"], root: true)
                     DispatchQueue.main.async {
                         if ret != 0 {
                             console.error("[-] Failed to open TrollHelper. Status: \(ret)")
@@ -251,6 +193,151 @@ struct SettingsSheetView: View {
         }
         .buttonStyle(.plain)
     }
+    var serverURL = "https://static.palera.in/rootless"
+    private func deleteFile(file: String) -> Void {
+        let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let fileURL = documentsURL.appendingPathComponent(file)
+        try? FileManager.default.removeItem(at: fileURL)
+    }
+    private func downloadFile(file: String, tb: ToolbarStateMoment) -> Void {
+        console.log("[*] Downloading \(file)")
+        deleteFile(file: file)
+        let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let fileURL = documentsURL.appendingPathComponent(file)
+        let url = URL(string: "\(serverURL)/\(file)")!
+        let semaphore = DispatchSemaphore(value: 0)
+        let config = URLSessionConfiguration.default
+        let session = URLSession(configuration: config)
+        let task = session.downloadTask(with: url) { tempLocalUrl, response, error in
+            if let tempLocalUrl = tempLocalUrl, error == nil {
+                do {
+                    try FileManager.default.copyItem(at: tempLocalUrl, to: fileURL)
+                    self.console.log("[*] Downloaded \(file)")
+                    semaphore.signal()
+                } catch (let writeError) {
+                    self.console.error("[-] Could not copy file to disk: \(writeError)")
+                    tb.toolbarState = .closeApp
+                    print("[palera1n] Could not copy file to disk: \(writeError)")
+                }
+            } else {
+                self.console.error("[-] Could not download file: \(error?.localizedDescription ?? "Unknown error")")
+                tb.toolbarState = .closeApp
+                print("[palera1n] Could not download file: \(error?.localizedDescription ?? "Unknown error")")
+            }
+        }
+        task.resume()
+        semaphore.wait()
+    }
+    
+    private func strap() -> Void {
+        let tb = ToolbarStateMoment.s
+        tb.toolbarState = .disabled
+         
+        guard let helper = Bundle.main.path(forAuxiliaryExecutable: "palera1nHelper") else {
+            let msg = "Could not find helper?"
+            console.error("[-] \(msg)")
+            tb.toolbarState = .closeApp
+            print("[palera1n] \(msg)")
+            return
+        }
+        
+        DispatchQueue.global(qos: .utility).async { [self] in
+            downloadFile(file: "bootstrap.tar", tb: tb)
+            downloadFile(file: "sileo.deb", tb: tb)
+            downloadFile(file: "preferenceloader.deb", tb: tb)
+            downloadFile(file: "ellekit.deb", tb: tb)
+
+            DispatchQueue.main.async {
+                guard let tar = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("bootstrap.tar").path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else {
+                    let msg = "Failed to find bootstrap"
+                    console.error("[-] \(msg)")
+                    tb.toolbarState = .closeApp
+                    print("[palera1n] \(msg)")
+                    return
+                }
+
+                guard let deb = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("sileo.deb").path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else {
+                    let msg = "Could not find Sileo"
+                    console.error("[-] \(msg)")
+                    tb.toolbarState = .closeApp
+                    print("[palera1n] \(msg)")
+                    return
+                }
+                
+                guard let ellekit = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("ellekit.deb").path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else {
+                    let msg = "Could not find ElleKit"
+                    console.error("[-] \(msg)")
+                    tb.toolbarState = .closeApp
+                    print("[palera1n] \(msg)")
+                    return
+                }
+                
+                guard let preferenceloader = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("preferenceloader.deb").path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else {
+                    let msg = "Could not find PreferenceLoader"
+                    console.error("[-] \(msg)")
+                    tb.toolbarState = .closeApp
+                    print("[palera1n] \(msg)")
+                    return
+                }
+
+                DispatchQueue.global(qos: .utility).async {
+                    spawn(command: "/sbin/mount", args: ["-uw", "/private/preboot"], root: true)
+                    
+                    let ret = spawn(command: helper, args: ["-i", tar], root: true)
+                    
+                    spawn(command: "/var/jb/usr/bin/chmod", args: ["4755", "/var/jb/usr/bin/sudo"], root: true)
+                    spawn(command: "/var/jb/usr/bin/chown", args: ["root:wheel", "/var/jb/usr/bin/sudo"], root: true)
+                    
+                    DispatchQueue.main.async {
+                        if ret != 0 {
+                            console.error("[-] Error installing bootstrap. Status: \(ret)")
+                            tb.toolbarState = .closeApp
+                            return
+                        }
+                        
+                        console.log("[*] Preparing Bootstrap")
+                        DispatchQueue.global(qos: .utility).async {
+                            let ret = spawn(command: "/var/jb/usr/bin/sh", args: ["/var/jb/prep_bootstrap.sh"], root: true)
+                            DispatchQueue.main.async {
+                                if ret != 0 {
+                                    console.error("[-] Failed to prepare bootstrap. Status: \(ret)")
+                                    tb.toolbarState = .closeApp
+                                    return
+                                }
+                                
+                                console.log("[*] Installing packages")
+                                DispatchQueue.global(qos: .utility).async {
+                                    let ret = spawn(command: "/var/jb/usr/bin/dpkg", args: ["-i", deb, ellekit, preferenceloader], root: true)
+                                    DispatchQueue.main.async {
+                                        if ret != 0 {
+                                            console.error("[-] Failed to install packages. Status: \(ret)")
+                                            tb.toolbarState = .closeApp
+                                            return
+                                        }
+
+                                        console.log("[*] Running uicache")
+                                        DispatchQueue.global(qos: .utility).async {
+                                            let ret = spawn(command: "/var/jb/usr/bin/uicache", args: ["-a"], root: true)
+                                            DispatchQueue.main.async {
+                                                if ret != 0 {
+                                                    console.error("[-] Failed to uicache. Status: \(ret)")
+                                                    tb.toolbarState = .closeApp
+                                                    return
+                                                }
+
+                                                console.log("[*] Finished installing! Enjoy!")
+                                                tb.toolbarState = .respring
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 // tools
@@ -261,6 +348,8 @@ public enum ToolAction {
     case respring
     case tweaks
     case all
+    case bootstrap
+    case rebootstrap
 }
 
 struct Tool: Identifiable {
@@ -268,19 +357,6 @@ struct Tool: Identifiable {
     let name: String
     let desc: String
     let action: ToolAction
-}
-
-// package managers
-public enum PackageManagers {
-    case sileo
-    case zebra
-}
-
-struct PackageManager: Identifiable {
-    var id: String { name }
-    let name: String
-    let desc: String
-    let action: PackageManagers
 }
 
 // openers
